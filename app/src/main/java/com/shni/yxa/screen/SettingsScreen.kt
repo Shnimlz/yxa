@@ -10,8 +10,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -95,6 +97,49 @@ fun SettingsScreen(currentTheme: YxaThemeMode, onThemeChange: (YxaThemeMode) -> 
                 }
             }
 
+            // Updater
+            var manualUpdateInfo by remember { mutableStateOf<com.shni.yxa.util.UpdateInfo?>(null) }
+            var isCheckingUpdate by remember { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
+
+            Card(onClick = {
+                if (!isCheckingUpdate) {
+                    isCheckingUpdate = true
+                    scope.launch {
+                        val update = com.shni.yxa.util.UpdateManager.checkForUpdates()
+                        if (update != null) {
+                            manualUpdateInfo = update
+                        } else {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                android.widget.Toast.makeText(context, "Yxa está en la última versión", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        isCheckingUpdate = false
+                    }
+                }
+            }, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer), shape = RoundedCornerShape(20.dp)) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (isCheckingUpdate) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(androidx.compose.material.icons.Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Buscar actualizaciones", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+                        Text("Versión actual: ${packageInfo.versionName}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+
+            if (manualUpdateInfo != null) {
+                com.shni.yxa.ui.components.UpdateDialog(
+                    updateInfo = manualUpdateInfo!!,
+                    onDismiss = { manualUpdateInfo = null }
+                )
+            }
+
             // Reset welcome
             var resetDone by remember { mutableStateOf(false) }
             OutlinedButton(onClick = {
@@ -106,6 +151,47 @@ fun SettingsScreen(currentTheme: YxaThemeMode, onThemeChange: (YxaThemeMode) -> 
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(if (resetDone) "Se mostrará al reiniciar" else "Mostrar pantalla de bienvenida", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            // Danger Zone
+            var showRestoreDialog by remember { mutableStateOf(false) }
+            
+            Spacer(Modifier.height(16.dp))
+            Text("Zona de Peligro", style = MaterialTheme.typography.titleSmall, color = Color(0xFFFF5252), fontWeight = FontWeight.SemiBold)
+            
+            Card(onClick = { showRestoreDialog = true }, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFFF5252).copy(alpha = 0.1f)), shape = RoundedCornerShape(20.dp)) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFF5252), modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Restaurar Valores de Fábrica", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Color(0xFFFF5252))
+                        Text("Revertir todas las optimizaciones y limpiar ajustes", style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF5252).copy(alpha = 0.8f))
+                    }
+                }
+            }
+            
+            if (showRestoreDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRestoreDialog = false },
+                    title = { Text("Restaurar de Fábrica") },
+                    text = { Text("¿Estás seguro de que quieres revertir todos los valores del kernel y borrar la configuración de Yxa?") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showRestoreDialog = false
+                                scope.launch {
+                                    com.shni.yxa.util.BackupManager.restoreBackup(context)
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                        android.widget.Toast.makeText(context, "Restauración completa. Por favor, reinicia la app.", android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        ) { Text("Restaurar", color = Color(0xFFFF5252)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRestoreDialog = false }) { Text("Cancelar") }
+                    }
+                )
             }
         }
         Spacer(modifier = Modifier.height(110.dp))

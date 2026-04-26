@@ -90,26 +90,77 @@ fun AppEntry(onCloseApp: () -> Unit) {
     }
 }
 
-private enum class AppState { WELCOME, CHECKING_ROOT, ROOT_OK, ROOT_FAILED }
+private enum class AppState { WELCOME, CHECKING_PERMISSIONS, CHECKING_ROOT, CREATING_BACKUP, ROOT_OK, ROOT_FAILED, UNSUPPORTED_OS }
 
 @Composable
 fun AppRoot(onCloseApp: () -> Unit, themeMode: YxaThemeMode, onThemeChange: (YxaThemeMode) -> Unit) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("yxa_prefs", Context.MODE_PRIVATE) }
     val isFirstLaunch = remember { !prefs.getBoolean("welcome_seen", false) }
-    var appState by remember { mutableStateOf(if (isFirstLaunch) AppState.WELCOME else AppState.CHECKING_ROOT) }
+    
+    var appState by remember { 
+        mutableStateOf(
+            if (android.os.Build.VERSION.SDK_INT <= 29) AppState.UNSUPPORTED_OS 
+            else if (isFirstLaunch) AppState.WELCOME 
+            else AppState.CHECKING_PERMISSIONS
+        )
+    }
+
+    val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    val onRequestNotifications = {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    val onRequestOverlay = {
+        val intent = android.content.Intent(
+            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            android.net.Uri.parse("package:${context.packageName}")
+        )
+        context.startActivity(intent)
+    }
+
+    val onRequestHibernation = {
+        val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = android.net.Uri.parse("package:${context.packageName}")
+        }
+        context.startActivity(intent)
+        android.widget.Toast.makeText(context, "Desactiva 'Pausar actividad de la app si no se usa'", android.widget.Toast.LENGTH_LONG).show()
+    }
+
+    val onVerifyPermissions = {
+        if (android.provider.Settings.canDrawOverlays(context)) {
+            appState = AppState.CHECKING_ROOT
+        } else {
+            android.widget.Toast.makeText(context, "Falta el permiso de Superposición", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     LaunchedEffect(appState) {
+        if (appState == AppState.CHECKING_PERMISSIONS && !isFirstLaunch) {
+            if (android.provider.Settings.canDrawOverlays(context)) {
+                appState = AppState.CHECKING_ROOT
+            }
+        }
         if (appState == AppState.CHECKING_ROOT) {
             val ok = validateRoot()
             if (isFirstLaunch) delay(800)
             if (ok) {
                 com.shni.yxa.util.DependencyManager.setupDependencies(context)
                 prefs.edit().putBoolean("welcome_seen", true).apply()
-                appState = AppState.ROOT_OK
+                appState = AppState.CREATING_BACKUP
             } else {
                 appState = AppState.ROOT_FAILED
             }
+        }
+        if (appState == AppState.CREATING_BACKUP) {
+            com.shni.yxa.util.BackupManager.createBackup(context)
+            delay(500) // Small delay for visual feedback
+            appState = AppState.ROOT_OK
         }
     }
 
@@ -118,9 +169,19 @@ fun AppRoot(onCloseApp: () -> Unit, themeMode: YxaThemeMode, onThemeChange: (Yxa
         else fadeIn(tween(350)).togetherWith(fadeOut(tween(250)))
     }, label = "appState") { state ->
         when (state) {
-            AppState.WELCOME -> WelcomeScreen(0, onStart = { appState = AppState.CHECKING_ROOT }, onDismissError = {})
-            AppState.CHECKING_ROOT -> WelcomeScreen(1, onStart = {}, onDismissError = {})
-            AppState.ROOT_FAILED -> WelcomeScreen(3, onStart = {}, onDismissError = onCloseApp)
+            AppState.WELCOME -> WelcomeScreen(
+                state = 0, onStart = { appState = AppState.CHECKING_PERMISSIONS }, onDismissError = {},
+                onRequestNotifications = {}, onRequestOverlay = {}, onRequestHibernation = {}, onVerifyPermissions = {}
+            )
+            AppState.CHECKING_PERMISSIONS -> WelcomeScreen(
+                state = 2, onStart = {}, onDismissError = {},
+                onRequestNotifications = onRequestNotifications, onRequestOverlay = onRequestOverlay,
+                onRequestHibernation = onRequestHibernation, onVerifyPermissions = onVerifyPermissions
+            )
+            AppState.CHECKING_ROOT -> WelcomeScreen(1, onStart = {}, onDismissError = {}, onRequestNotifications = {}, onRequestOverlay = {}, onRequestHibernation = {}, onVerifyPermissions = {})
+            AppState.CREATING_BACKUP -> WelcomeScreen(5, onStart = {}, onDismissError = {}, onRequestNotifications = {}, onRequestOverlay = {}, onRequestHibernation = {}, onVerifyPermissions = {})
+            AppState.ROOT_FAILED -> WelcomeScreen(3, onStart = {}, onDismissError = onCloseApp, onRequestNotifications = {}, onRequestOverlay = {}, onRequestHibernation = {}, onVerifyPermissions = {})
+            AppState.UNSUPPORTED_OS -> WelcomeScreen(4, onStart = {}, onDismissError = onCloseApp, onRequestNotifications = {}, onRequestOverlay = {}, onRequestHibernation = {}, onVerifyPermissions = {})
             AppState.ROOT_OK -> AppNavigation(themeMode, onThemeChange)
         }
     }
@@ -137,6 +198,19 @@ fun AppNavigation(themeMode: YxaThemeMode, onThemeChange: (YxaThemeMode) -> Unit
     var showSettings by remember { mutableStateOf(false) }
     var settingsScreen by remember { mutableStateOf<Screen?>(null) }
     val scope = rememberCoroutineScope()
+
+    var updateInfo by remember { mutableStateOf<com.shni.yxa.util.UpdateInfo?>(null) }
+    var hasCheckedUpdate by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(hasCheckedUpdate) {
+        if (!hasCheckedUpdate) {
+            val update = com.shni.yxa.util.UpdateManager.checkForUpdates()
+            if (update != null) {
+                updateInfo = update
+            }
+            hasCheckedUpdate = true
+        }
+    }
 
     val context = LocalContext.current
 
@@ -315,6 +389,13 @@ fun AppNavigation(themeMode: YxaThemeMode, onThemeChange: (YxaThemeMode) -> Unit
                 }
             }
         }
+    }
+
+    if (updateInfo != null) {
+        com.shni.yxa.ui.components.UpdateDialog(
+            updateInfo = updateInfo!!,
+            onDismiss = { updateInfo = null }
+        )
     }
 }
 

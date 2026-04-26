@@ -41,6 +41,10 @@ fun WelcomeScreen(
     state: Int,
     onStart: () -> Unit,
     onDismissError: () -> Unit,
+    onRequestNotifications: () -> Unit,
+    onRequestOverlay: () -> Unit,
+    onRequestHibernation: () -> Unit,
+    onVerifyPermissions: () -> Unit
 ) {
     val primaryGreen = Color(0xFF66FF99)
 
@@ -274,6 +278,33 @@ fun WelcomeScreen(
                             )
                         }
                     }
+                    5 -> {
+                        Button(
+                            onClick = {},
+                            enabled = false,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                disabledContainerColor = primaryGreen.copy(alpha = 0.25f),
+                                disabledContentColor = Color.Black.copy(alpha = 0.7f)
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = Color.Black.copy(alpha = 0.7f),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                "Creando copia de seguridad...",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                     3 -> {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -314,6 +345,76 @@ fun WelcomeScreen(
                                 ) {
                                     Text("Cerrar", fontWeight = FontWeight.SemiBold)
                                 }
+                            }
+                        }
+                    }
+                    4 -> {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color(0xFF1A0505)
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(20.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFF5252), modifier = Modifier.size(20.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "Sistema no compatible",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = Color(0xFFFF5252),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    "Yxa requiere Android 11 o superior para funcionar de manera segura. Tu versión de Android no está soportada.",
+                                    style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
+                                    color = Color.White.copy(alpha = 0.5f)
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Button(
+                                    onClick = onDismissError,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFFFF5252).copy(alpha = 0.15f),
+                                        contentColor = Color(0xFFFF5252)
+                                    ),
+                                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+                                ) {
+                                    Text("Cerrar", fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
+                    2 -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Permisos requeridos", style = MaterialTheme.typography.titleSmall, color = primaryGreen, fontWeight = FontWeight.Bold)
+                            
+                            Button(onClick = onRequestNotifications, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f), contentColor = Color.White)) {
+                                Text("1. Permitir Notificaciones")
+                            }
+                            
+                            Button(onClick = onRequestOverlay, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f), contentColor = Color.White)) {
+                                Text("2. Permiso de Superposición")
+                            }
+                            
+                            Button(onClick = onRequestHibernation, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f), contentColor = Color.White)) {
+                                Text("3. Desactivar Hibernación")
+                            }
+
+                            Spacer(Modifier.height(8.dp))
+
+                            Button(onClick = onVerifyPermissions, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = primaryGreen, contentColor = Color.Black)) {
+                                Text("Verificar y Continuar", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
