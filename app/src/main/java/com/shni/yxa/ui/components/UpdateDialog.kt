@@ -15,10 +15,26 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import androidx.compose.ui.text.withStyle
 import com.shni.yxa.util.UpdateInfo
 import com.shni.yxa.util.UpdateManager
 import kotlinx.coroutines.launch
 import java.io.File
+
+fun parseMarkdown(text: String): androidx.compose.ui.text.AnnotatedString {
+    val builder = androidx.compose.ui.text.AnnotatedString.Builder()
+    val regex = Regex("\\*\\*(.*?)\\*\\*")
+    var lastIndex = 0
+    regex.findAll(text).forEach { matchResult ->
+        builder.append(text.substring(lastIndex, matchResult.range.first))
+        builder.withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)) {
+            builder.append(matchResult.groupValues[1])
+        }
+        lastIndex = matchResult.range.last + 1
+    }
+    builder.append(text.substring(lastIndex))
+    return builder.toAnnotatedString()
+}
 
 @Composable
 fun UpdateDialog(
@@ -76,7 +92,7 @@ fun UpdateDialog(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        updateInfo.changelog,
+                        text = parseMarkdown(updateInfo.changelog),
                         style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp)
                     )
                 }
