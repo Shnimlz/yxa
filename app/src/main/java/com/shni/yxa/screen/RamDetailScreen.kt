@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Balance
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.RocketLaunch
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
@@ -223,6 +224,104 @@ private fun VmSlider(label: String, desc: String, value: Int, min: Int, max: Int
 private fun AdvancedRamTab(zramAvail: Boolean, zramMb: Int, ksmAvail: Boolean, ksmEn: Boolean, scope: kotlinx.coroutines.CoroutineScope, context: Context, onKsmToggle: (Boolean) -> Unit) {
     var showDrop by remember { mutableStateOf(false) }
     var dropDone by remember { mutableStateOf(false) }
+    
+    val prefs = context.getSharedPreferences("yxa_prefs", Context.MODE_PRIVATE)
+    var autoCleanEnabled by remember { mutableStateOf(prefs.getBoolean("auto_ram_clean", false)) }
+    var autoCleanThreshold by remember { mutableIntStateOf(prefs.getInt("auto_ram_clean_threshold", 75)) }
+    var whitelist by remember { mutableStateOf(prefs.getStringSet("ram_whitelist", emptySet()) ?: emptySet()) }
+    var newPackageName by remember { mutableStateOf("") }
+    
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer), shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Limpieza Automática (Auto-Drop)", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
+            Text("Monitorea la memoria y libera RAM cuando se supera el umbral.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Activar Auto-Drop", style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = autoCleanEnabled,
+                    onCheckedChange = {
+                        autoCleanEnabled = it
+                        prefs.edit().putBoolean("auto_ram_clean", it).apply()
+                        if (it) {
+                            com.shni.yxa.service.AutoRamCleanerService.start(context)
+                        } else {
+                            com.shni.yxa.service.AutoRamCleanerService.stop(context)
+                        }
+                    },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.tertiary)
+                )
+            }
+            if (autoCleanEnabled) {
+                Spacer(Modifier.height(8.dp))
+                Text("Umbral de RAM: $autoCleanThreshold%", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Slider(
+                    value = autoCleanThreshold.toFloat(),
+                    onValueChange = {
+                        autoCleanThreshold = it.toInt()
+                        prefs.edit().putInt("auto_ram_clean_threshold", it.toInt()).apply()
+                    },
+                    valueRange = 60f..95f,
+                    colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.tertiary, activeTrackColor = MaterialTheme.colorScheme.tertiary, inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+                )
+                
+                Spacer(Modifier.height(16.dp))
+                Text("Lista de Excepciones", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
+                Text("Aplicaciones que nunca serán cerradas.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = newPackageName,
+                        onValueChange = { newPackageName = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("ej. com.spotify.music") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    Button(
+                        onClick = {
+                            if (newPackageName.isNotBlank()) {
+                                val updatedSet = whitelist + newPackageName.trim()
+                                whitelist = updatedSet
+                                prefs.edit().putStringSet("ram_whitelist", updatedSet).apply()
+                                newPackageName = ""
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Añadir")
+                    }
+                }
+                
+                if (whitelist.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        whitelist.forEach { pkg ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text(pkg, style = MaterialTheme.typography.bodySmall)
+                                    IconButton(
+                                        onClick = {
+                                            val updatedSet = whitelist - pkg
+                                            whitelist = updatedSet
+                                            prefs.edit().putStringSet("ram_whitelist", updatedSet).apply()
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(Icons.Default.Close, contentDescription = "Eliminar", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer), shape = RoundedCornerShape(16.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Drop Caches", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)

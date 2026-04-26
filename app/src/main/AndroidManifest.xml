@@ -47,6 +47,15 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Network jitter monitor that protects gaming sessions from background traffic" />
         </service>
+
+        <service
+            android:name=".service.AutoRamCleanerService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Memory usage monitor that automatically cleans RAM when thresholds are exceeded" />
+        </service>
     </application>
 
 </manifest>
