@@ -370,6 +370,9 @@ fun AppNavigation(themeMode: YxaThemeMode, onThemeChange: (YxaThemeMode) -> Unit
                     BottomTab.RED -> {
                         NetworkSettingsScreen()
                     }
+                    BottomTab.PROC -> {
+                        ProcessScreen(onBack = { selectedTab = BottomTab.HOME })
+                    }
                     BottomTab.LOGS -> {
                         LogsScreen()
                     }

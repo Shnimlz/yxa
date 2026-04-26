@@ -76,7 +76,8 @@ fun RamDetailScreen(onBack: () -> Unit) {
             overcommit = readInt("/proc/sys/vm/overcommit_memory", 0)
             zramAvailable = Shell.su("cat /sys/block/zram0/disksize") != null
             if (zramAvailable) zramSizeMb = ((Shell.su("cat /sys/block/zram0/disksize")?.trim()?.toLongOrNull() ?: 0L) / 1024 / 1024).toInt()
-            ksmAvailable = Shell.su("cat /sys/kernel/mm/ksm/run") != null
+            // Use test -f to check existence silently, avoiding error log spam on devices without KSM
+            ksmAvailable = Shell.su("test -f /sys/kernel/mm/ksm/run && echo yes")?.trim() == "yes"
             if (ksmAvailable) ksmEnabled = Shell.su("cat /sys/kernel/mm/ksm/run")?.trim() == "1"
         }
         isLoading = false
