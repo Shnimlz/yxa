@@ -25,6 +25,7 @@ import com.shni.yxa.ui.theme.YxaThemeMode
 
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.VideogameAsset
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

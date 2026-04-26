@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import androidx.annotation.RequiresApi
 import com.shni.yxa.util.Shell
 import kotlinx.coroutines.*
 
@@ -49,7 +48,7 @@ class LagProtectorService : Service() {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    @Suppress("DEPRECATION")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Yxa Activo")

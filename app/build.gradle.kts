@@ -15,8 +15,8 @@ android {
         applicationId = "com.shni.yxa"
         minSdk = 28
         targetSdk = 36
-        versionCode = 18
-        versionName = "1.4-3"
+        versionCode = 23
+        versionName = "1.4-8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

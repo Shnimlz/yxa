@@ -54,7 +54,15 @@ class GameOverlayService : Service() {
         super.onCreate()
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         createNotificationChannel()
-        startForeground(NOTIF_ID, buildNotification())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                startForeground(NOTIF_ID, buildNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } catch (_: Exception) {
+                startForeground(NOTIF_ID, buildNotification())
+            }
+        } else {
+            startForeground(NOTIF_ID, buildNotification())
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -72,27 +80,11 @@ class GameOverlayService : Service() {
             val maxOutOfFocusCount = 10 // 10 checks * 2 seconds = 20 seconds
 
             while (true) {
-                // Ejecutar dumpsys sin pipes problemáticos y procesar en Kotlin
                 val focusDump = withContext(Dispatchers.IO) { 
-                    Shell.su("dumpsys window displays", silentLog = true) 
+                    Shell.su("dumpsys window displays 2>/dev/null | grep mCurrentFocus", silentLog = true) 
                 } ?: ""
                 
-                var inForegroundFinal = false
-                val lines = focusDump.split('\n')
-                for (line in lines) {
-                    if (line.contains("mCurrentFocus") || line.contains("mFocusedApp") || 
-                        line.contains("mResumedActivity") || line.contains("deepestLastOrientationSource")) {
-                        android.util.Log.d("YxaGameTime", "Focus line detected: $line")
-                        if (line.contains(gamePackage)) {
-                            inForegroundFinal = true
-                            break
-                        }
-                    }
-                }
-                
-                // Mantenemos el log del dump (limitado a 500 chars para no saturar)
-                android.util.Log.d("YxaGameTime", "Current FocusDump (First 500 chars): ${focusDump.take(500)}")
-                android.util.Log.d("YxaGameTime", "Searching for package: $gamePackage | Result: $inForegroundFinal")
+                val inForegroundFinal = focusDump.contains(gamePackage)
                 
                 withContext(Dispatchers.Main) {
                     if (inForegroundFinal) {
@@ -507,16 +499,28 @@ class GameOverlayService : Service() {
             while (isPanelOpen) {
                 try {
                     val (cpu, ram, gpu, temp) = withContext(Dispatchers.IO) {
-                        val stat = Shell.su("cat /proc/stat", silentLog = true)?.lines()?.firstOrNull { it.startsWith("cpu ") }
-                        val cpuPct = parseCpuLine(stat)
-                        val memLines = Shell.su("cat /proc/meminfo", silentLog = true)?.lines() ?: emptyList()
-                        val total = memLines.find { it.startsWith("MemTotal") }?.split("\\s+".toRegex())?.getOrNull(1)?.toLongOrNull() ?: 1L
-                        val avail = memLines.find { it.startsWith("MemAvailable") }?.split("\\s+".toRegex())?.getOrNull(1)?.toLongOrNull() ?: 0L
+                        // Gather all data in a single lightweight root shell execution to save CPU and battery
+                        val script = """
+                            cat /proc/stat | grep -m 1 '^cpu '
+                            cat /proc/meminfo | grep -E 'MemTotal|MemAvailable'
+                            cat /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage 2>/dev/null || cat /sys/class/devfreq/*gpu*/load 2>/dev/null | awk '{print ${'$'}1}' || echo "0"
+                            cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo "0"
+                        """.trimIndent()
+                        val outLines = Shell.su(script, silentLog = true)?.lines() ?: emptyList()
+                        
+                        val cpuPct = parseCpuLine(outLines.find { it.startsWith("cpu ") })
+                        
+                        val total = outLines.find { it.startsWith("MemTotal:") }?.split("\\s+".toRegex())?.getOrNull(1)?.toLongOrNull() ?: 1L
+                        val avail = outLines.find { it.startsWith("MemAvailable:") }?.split("\\s+".toRegex())?.getOrNull(1)?.toLongOrNull() ?: 0L
                         val ramPct = ((total - avail) * 100 / total).toInt()
-                        val gpuPct = Shell.su("cat /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage 2>/dev/null", silentLog = true)?.replace("%","")?.trim()?.toIntOrNull()
-                            ?: Shell.su("cat /sys/class/devfreq/*gpu*/load 2>/dev/null", silentLog = true)?.split("\\s+".toRegex())?.firstOrNull()?.toIntOrNull() ?: 0
-                        val t = Shell.su("cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null", silentLog = true)?.trim()?.toIntOrNull()?.let { if (it > 1000) it / 1000 else it } ?: 0
-                        arrayOf(cpuPct, ramPct, gpuPct, t)
+                        
+                        // Last two lines should be GPU and Temp (ignoring empty lines)
+                        val numbers = outLines.filter { it.trim().matches(Regex("\\d+%?")) }
+                        val gpuRaw = numbers.getOrNull(numbers.size - 2)?.replace("%", "")?.toIntOrNull() ?: 0
+                        val tempRaw = numbers.lastOrNull()?.toIntOrNull() ?: 0
+                        val t = if (tempRaw > 1000) tempRaw / 1000 else tempRaw
+
+                        arrayOf(cpuPct, ramPct, gpuRaw, t)
                     }
                     cpuGauge?.progress = cpu; cpuText?.text = "$cpu%"
                     ramGauge?.progress = ram; ramText?.text = "$ram%"

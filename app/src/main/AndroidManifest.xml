@@ -61,6 +61,15 @@
         </service>
 
         <service
+            android:name=".service.GameWatcherService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Monitors foreground apps to detect when games are launched outside the app to automatically apply performance profiles and overlay" />
+        </service>
+
+        <service
             android:name=".service.LagProtectorService"
             android:exported="false"
             android:foregroundServiceType="specialUse">

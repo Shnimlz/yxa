@@ -93,13 +93,41 @@ fun GameTimeScreen(onOpenSettings: (String) -> Unit) {
                 }
             }
 
+            // GameWatcher banner
+            item {
+                var gameWatcherEnabled by remember { mutableStateOf(context.getSharedPreferences("yxa_prefs", Context.MODE_PRIVATE).getBoolean("game_watcher_enabled", false)) }
+                
+                Card(onClick = {
+                    gameWatcherEnabled = !gameWatcherEnabled
+                    context.getSharedPreferences("yxa_prefs", Context.MODE_PRIVATE).edit().putBoolean("game_watcher_enabled", gameWatcherEnabled).apply()
+                    if (gameWatcherEnabled) {
+                        com.shni.yxa.service.GameWatcherService.start(context)
+                    } else {
+                        com.shni.yxa.service.GameWatcherService.stop(context)
+                    }
+                }, Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh), shape = RoundedCornerShape(16.dp)) {
+                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.VideogameAsset, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Auto-detectar juegos", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text("Aplica optimizaciones automáticamente", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = gameWatcherEnabled, onCheckedChange = null)
+                    }
+                }
+            }
+
             // Game list
             items(games, key = { it.packageName }) { game ->
                 val icon = remember(game.packageName) {
                     try { pm.getApplicationIcon(game.packageName) } catch (_: Exception) { null }
                 }
                 GameCard(game, icon, onSettings = { onOpenSettings(game.packageName) },
-                    onLaunch = { launchGame(context, game, scope) },
+                    onLaunch = {
+                        android.util.Log.i("YxaGameLaunch", "Play button pressed for ${game.packageName}")
+                        launchGame(context, game, scope)
+                    },
                     onDelete = { repo.delete(game.packageName); games = repo.getAll() })
             }
 
@@ -260,95 +288,85 @@ private fun GameCard(game: GameProfile, icon: Drawable?, onSettings: () -> Unit,
 }
 
 private fun launchGame(context: Context, game: GameProfile, scope: kotlinx.coroutines.CoroutineScope) {
-    // Apply profile
+    android.util.Log.i("YxaGameLaunch", "Launching ${game.packageName} with profile: perfMode=${game.perfMode}")
     scope.launch(Dispatchers.IO) {
-        // CPU
-        val gov = when (game.perfMode) { 0 -> "powersave"; 2 -> "performance"; else -> "schedutil" }
-        Shell.su("for c in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo $gov > \$c 2>/dev/null; done")
+        try {
+            val gov = when (game.perfMode) { 0 -> "powersave"; 2 -> "performance"; else -> "schedutil" }
+            Shell.su("for c in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo $gov > \$c 2>/dev/null; done")
 
-        // Refresh rate
-        Shell.su("settings put system min_refresh_rate ${game.refreshRate}")
-        Shell.su("settings put system peak_refresh_rate ${game.refreshRate}")
-        val checkHz = Shell.su("settings get system min_refresh_rate")?.trim()
-        android.util.Log.d("YxaVerifier", "Hz applied: $checkHz")
+            Shell.su("settings put system min_refresh_rate ${game.refreshRate}")
+            Shell.su("settings put system peak_refresh_rate ${game.refreshRate}")
 
-        // Resolution
-        if (game.resolution < 100) {
-            val rawSize = Shell.su("wm size")?.substringAfter("Physical size:")?.trim() ?: return@launch
-            val rawDensity = Shell.su("wm density")?.substringAfter("Physical density:")?.substringBefore('\n')?.trim() ?: return@launch
-            val parts = rawSize.split("x")
-            if (parts.size == 2) {
-                val w = parts[0].trim().toIntOrNull() ?: return@launch
-                val h = parts[1].trim().toIntOrNull() ?: return@launch
-                val newW = w * game.resolution / 100
-                val newH = h * game.resolution / 100
-                Shell.su("wm size ${newW}x${newH}")
-                
-                val density = rawDensity.toIntOrNull()
-                if (density != null) {
-                    val newDensity = density * game.resolution / 100
-                    Shell.su("wm density $newDensity")
+            if (game.resolution < 100) {
+                val rawSize = Shell.su("wm size")?.substringAfter("Physical size:")?.trim()
+                val rawDensity = Shell.su("wm density")?.substringAfter("Physical density:")?.substringBefore('\n')?.trim()
+                if (rawSize != null && rawDensity != null) {
+                    val parts = rawSize.split("x")
+                    if (parts.size == 2) {
+                        val w = parts[0].trim().toIntOrNull()
+                        val h = parts[1].trim().toIntOrNull()
+                        if (w != null && h != null) {
+                            val newW = w * game.resolution / 100
+                            val newH = h * game.resolution / 100
+                            Shell.su("wm size ${newW}x${newH}")
+                            val density = rawDensity.toIntOrNull()
+                            if (density != null) {
+                                Shell.su("wm density ${density * game.resolution / 100}")
+                            }
+                        }
+                    }
+                }
+            } else {
+                Shell.su("wm size reset")
+                Shell.su("wm density reset")
+            }
+
+            if (game.graphicsApi == "default") {
+                Shell.su("settings delete global angle_gl_driver_selection_pkgs")
+                Shell.su("settings delete global angle_gl_driver_selection_values")
+            } else {
+                Shell.su("settings put global angle_gl_driver_selection_pkgs ${game.packageName}")
+                Shell.su("settings put global angle_gl_driver_selection_values ${game.graphicsApi}")
+            }
+
+            if (game.touchSensitivity) Shell.su("echo 1 > /proc/touchpanel/game_switch_enable 2>/dev/null")
+            if (game.wifiLowLatency) {
+                Shell.su("sysctl -w net.ipv4.tcp_low_latency=1 2>/dev/null")
+                Shell.su("sysctl -w net.ipv4.tcp_congestion_control=${game.tcpCongestion} 2>/dev/null")
+                if (game.advancedNet) {
+                    Shell.su("sysctl -w net.ipv4.tcp_rmem='4096 87380 1048576' 2>/dev/null")
+                    Shell.su("sysctl -w net.ipv4.tcp_wmem='4096 16384 1048576' 2>/dev/null")
                 }
             }
-        } else {
-            Shell.su("wm size reset")
-            Shell.su("wm density reset")
-        }
-
-        // Graphics API
-        if (game.graphicsApi == "default") {
-            Shell.su("settings delete global angle_gl_driver_selection_pkgs")
-            Shell.su("settings delete global angle_gl_driver_selection_values")
-            val checkApi = Shell.su("settings get global angle_gl_driver_selection_pkgs")?.trim()
-            android.util.Log.d("YxaVerifier", "Graphics API applied (default): $checkApi")
-        } else {
-            Shell.su("settings put global angle_gl_driver_selection_pkgs ${game.packageName}")
-            Shell.su("settings put global angle_gl_driver_selection_values ${game.graphicsApi}")
-            val checkApi = Shell.su("settings get global angle_gl_driver_selection_values")?.trim()
-            android.util.Log.d("YxaVerifier", "Graphics API applied (${game.graphicsApi}): $checkApi")
-        }
-
-        // Touch
-        if (game.touchSensitivity) Shell.su("echo 1 > /proc/touchpanel/game_switch_enable 2>/dev/null")
-        // Wi-Fi
-        if (game.wifiLowLatency) {
-            Shell.su("sysctl -w net.ipv4.tcp_low_latency=1 2>/dev/null")
-            Shell.su("sysctl -w net.ipv4.tcp_congestion_control=${game.tcpCongestion} 2>/dev/null")
-            val checkTcp = Shell.su("sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null")?.trim()
-            android.util.Log.d("YxaVerifier", "TCP algorithm applied: $checkTcp")
-            if (game.advancedNet) {
-                // Set minimum buffers to prevent lag spikes (bloatbuffer)
-                Shell.su("sysctl -w net.ipv4.tcp_rmem='4096 87380 1048576' 2>/dev/null")
-                Shell.su("sysctl -w net.ipv4.tcp_wmem='4096 16384 1048576' 2>/dev/null")
+            if (game.gpuBoost) {
+                Shell.su("echo performance > /sys/class/kgsl/kgsl-3d0/devfreq/governor 2>/dev/null")
+                Shell.su("echo performance > /sys/class/devfreq/*gpu*/governor 2>/dev/null")
             }
-        }
-        // GPU
-        if (game.gpuBoost) {
-            Shell.su("echo performance > /sys/class/kgsl/kgsl-3d0/devfreq/governor 2>/dev/null")
-            Shell.su("echo performance > /sys/class/devfreq/*gpu*/governor 2>/dev/null")
-        }
-        // DND
-        if (game.dndEnabled) Shell.su("cmd notification set_dnd priority 2>/dev/null")
-        
-        // Extreme Memory Management
-        if (game.aggressiveClear) {
-            Shell.su("sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null")
-        }
-        if (game.disableZram) {
-            Shell.su("sysctl -w vm.swappiness=10 2>/dev/null")
-        }
-        if (game.killBackground) {
-            Shell.su("am kill-all 2>/dev/null; am shrink-all 2>/dev/null")
+            if (game.dndEnabled) Shell.su("cmd notification set_dnd priority 2>/dev/null")
+            if (game.aggressiveClear) Shell.su("sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null")
+            if (game.disableZram) Shell.su("sysctl -w vm.swappiness=10 2>/dev/null")
+            if (game.killBackground) Shell.su("am kill-all 2>/dev/null; am shrink-all 2>/dev/null")
+
+            android.util.Log.i("YxaGameLaunch", "All game settings applied for ${game.packageName}")
+        } catch (e: Exception) {
+            android.util.Log.e("YxaGameLaunch", "Failed to apply game settings", e)
         }
     }
 
-    if (Settings.canDrawOverlays(context)) {
-        val prefs = context.getSharedPreferences("yxa_prefs", android.content.Context.MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean("overlay_active", true)
-            .putString("last_overlay_pkg", game.packageName)
-            .apply()
-        GameOverlayService.start(context, game.packageName)
+    try {
+        if (Settings.canDrawOverlays(context)) {
+            val prefs = context.getSharedPreferences("yxa_prefs", android.content.Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("overlay_active", true)
+                .putString("last_overlay_pkg", game.packageName)
+                .apply()
+            GameOverlayService.start(context, game.packageName)
+            android.util.Log.i("YxaGameLaunch", "GameOverlayService started for ${game.packageName}")
+        } else {
+            android.util.Log.w("YxaGameLaunch", "Overlay permission not granted, skipping overlay")
+        }
+    } catch (e: Exception) {
+        android.util.Log.e("YxaGameLaunch", "Failed to start overlay", e)
     }
 
     val launchIntent = context.packageManager.getLaunchIntentForPackage(game.packageName)
