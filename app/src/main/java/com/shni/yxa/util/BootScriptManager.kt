@@ -60,9 +60,12 @@ object BootScriptManager {
     }
 
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private var debounceJob: kotlinx.coroutines.Job? = null
 
     private fun regenerateScript(context: Context) {
-        scope.launch {
+        debounceJob?.cancel()
+        debounceJob = scope.launch {
+            kotlinx.coroutines.delay(500) // Coalesce rapid successive calls into one write
             val prefs = getPrefs(context)
         val cpuEnabled = prefs.getBoolean(PREF_CPU_ENABLED, false)
         val ramEnabled = prefs.getBoolean(PREF_RAM_ENABLED, false)
