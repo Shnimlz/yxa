@@ -7,41 +7,48 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.shni.yxa.util.Shell
 import kotlinx.coroutines.*
 import java.io.File
 
 class AutoRamCleanerService : Service() {
+
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val notifId = 1001
+    private val channelId = "yxa_services"
+    private val textIdle = "Optimizando el sistema en segundo plano"
+    private val textCleaned = "Limpieza profunda ejecutada. RAM liberada."
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel("yxa_services", "Servicios de Optimización Yxa", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(channelId, "Servicios de Optimizacion Yxa", NotificationManager.IMPORTANCE_LOW)
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = NotificationCompat.Builder(this, "yxa_services")
+        val notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("Yxa Activo")
-            .setContentText("Optimizando el sistema en segundo plano")
+            .setContentText(textIdle)
             .setSmallIcon(android.R.drawable.ic_menu_manage)
             .setOngoing(true)
             .build()
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
-                startForeground(1001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-            } catch (e: Exception) {
-                startForeground(1001, notification)
+                startForeground(notifId, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } catch (_: Exception) {
+                startForeground(notifId, notification)
             }
         } else {
-            startForeground(1001, notification)
+            startForeground(notifId, notification)
         }
 
         serviceScope.launch {
@@ -49,59 +56,59 @@ class AutoRamCleanerService : Service() {
                 try {
                     val prefs = getSharedPreferences("yxa_prefs", Context.MODE_PRIVATE)
                     val isEnabled = prefs.getBoolean("auto_ram_clean", false)
-                    
+
                     if (!isEnabled) {
                         stopSelf()
                         break
                     }
 
                     val threshold = prefs.getInt("auto_ram_clean_threshold", 75)
-                    
+
                     val meminfo = File("/proc/meminfo").readText()
                     var memTotal = 0L
                     var memAvailable = 0L
-                    
+
                     meminfo.lines().forEach { line ->
-                        if (line.startsWith("MemTotal:")) {
-                            memTotal = line.substringAfter("MemTotal:").substringBefore("kB").trim().toLongOrNull() ?: 0L
-                        } else if (line.startsWith("MemAvailable:")) {
-                            memAvailable = line.substringAfter("MemAvailable:").substringBefore("kB").trim().toLongOrNull() ?: 0L
+                        when {
+                            line.startsWith("MemTotal:") ->
+                                memTotal = line.substringAfter("MemTotal:").substringBefore("kB").trim().toLongOrNull() ?: 0L
+                            line.startsWith("MemAvailable:") ->
+                                memAvailable = line.substringAfter("MemAvailable:").substringBefore("kB").trim().toLongOrNull() ?: 0L
                         }
                     }
 
-                    var delayedLong = false
+                    var didClean = false
                     if (memTotal > 0) {
-                        val memUsed = memTotal - memAvailable
-                        val usedPercent = ((memUsed.toDouble() / memTotal.toDouble()) * 100).toInt()
-                        
+                        val usedPercent = (((memTotal - memAvailable).toDouble() / memTotal) * 100).toInt()
+
                         if (usedPercent > threshold) {
                             Shell.su("sync; echo 3 > /proc/sys/vm/drop_caches")
-                            
+
                             val whitelist = prefs.getStringSet("ram_whitelist", emptySet()) ?: emptySet()
                             val output = Shell.su("pm list packages -3", silentLog = true)
                             if (output != null) {
-                                val packagesToKill = output.lines()
+                                output.lines()
                                     .filter { it.startsWith("package:") }
                                     .map { it.removePrefix("package:").trim() }
                                     .filter { it.isNotBlank() && it != "com.shni.yxa" && !whitelist.contains(it) }
-                                
-                                packagesToKill.forEach { pkg ->
-                                    Shell.su("am kill $pkg", silentLog = true)
-                                }
+                                    .forEach { pkg -> Shell.su("am kill $pkg", silentLog = true) }
                             }
-                            
-                            delayedLong = true
+
+                            didClean = true
+                            updateNotification(textCleaned)
                         }
                     }
-                    
-                    if (delayedLong) {
-                        delay(60000)
+
+                    if (didClean) {
+                        delay(10_000)
+                        updateNotification(textIdle)
+                        delay(50_000)
                     } else {
-                        delay(5000)
+                        delay(5_000)
                     }
 
-                } catch (e: Exception) {
-                    delay(5000)
+                } catch (_: Exception) {
+                    delay(5_000)
                 }
             }
         }
@@ -111,6 +118,17 @@ class AutoRamCleanerService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
+    }
+
+    private fun updateNotification(text: String) {
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Yxa Activo")
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.ic_menu_manage)
+            .setOngoing(true)
+            .build()
+        val nm = getSystemService(NotificationManager::class.java)
+        nm?.notify(notifId, notification)
     }
 
     companion object {
@@ -124,8 +142,7 @@ class AutoRamCleanerService : Service() {
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, AutoRamCleanerService::class.java)
-            context.stopService(intent)
+            context.stopService(Intent(context, AutoRamCleanerService::class.java))
         }
     }
 }

@@ -5,14 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import androidx.annotation.RequiresApi
 import com.shni.yxa.util.Shell
 import kotlinx.coroutines.*
 
-/**
- * Foreground service that monitors network jitter every 30 seconds.
- * If jitter exceeds the threshold, it blocks non-essential app traffic
- * using iptables to protect the gaming session.
- */
 class LagProtectorService : Service() {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -20,14 +16,13 @@ class LagProtectorService : Service() {
     private var isShielded = false
 
     companion object {
-        private const val CHANNEL_ID = "yxa_lag_protector"
-        private const val NOTIF_ID = 2002
+        private const val CHANNEL_ID = "yxa_services"
+        private const val NOTIF_ID = 1002
         private const val JITTER_THRESHOLD_MS = 30.0
         private const val CHECK_INTERVAL_MS = 30_000L
-        private const val TEST_SERVER_IP = "121.127.43.65"
-        private const val TEST_SERVER_PORT = "5201"
 
-        private val JITTER_REGEX = Regex("""(\d+\.?\d*)\s+ms\s+\d+""")
+        private val MTU_CANDIDATES = listOf(1500, 1492, 1460, 1400)
+        private val MDEV_REGEX = Regex("""rtt min/avg/max/mdev = [\d.]+/[\d.]+/[\d.]+/([\d.]+)""")
 
         fun start(context: Context) {
             val intent = Intent(context, LagProtectorService::class.java)
@@ -48,28 +43,29 @@ class LagProtectorService : Service() {
     override fun onCreate() {
         super.onCreate()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel("yxa_services", "Servicios de Optimización Yxa", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(CHANNEL_ID, "Servicios de Optimizacion Yxa", NotificationManager.IMPORTANCE_LOW)
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = Notification.Builder(this, "yxa_services")
+        val notification = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Yxa Activo")
-            .setContentText("Optimizando el sistema en segundo plano")
+            .setContentText("Escudo Anti-Lag en standby")
             .setSmallIcon(android.R.drawable.ic_menu_manage)
             .setOngoing(true)
             .build()
-            
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
-                startForeground(1002, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-            } catch (e: Exception) {
-                startForeground(1002, notification)
+                startForeground(NOTIF_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } catch (_: Exception) {
+                startForeground(NOTIF_ID, notification)
             }
         } else {
-            startForeground(1002, notification)
+            startForeground(NOTIF_ID, notification)
         }
 
         startMonitoring()
@@ -91,14 +87,15 @@ class LagProtectorService : Service() {
                     val jitter = measureJitter()
                     if (jitter != null && jitter > JITTER_THRESHOLD_MS) {
                         if (!isShielded) {
+                            val mtu = applyBestMtu()
                             activateShield()
                             isShielded = true
-                            updateNotification("Red inestable (${String.format("%.1f", jitter)}ms). Escudo ACTIVO.")
+                            updateNotification("Red inestable (${String.format("%.1f", jitter)}ms) | Escudo ACTIVO | MTU: $mtu")
                         }
                     } else if (isShielded) {
                         cleanupIptables()
                         isShielded = false
-                        updateNotification("Optimizando el sistema en segundo plano")
+                        updateNotification("Escudo Anti-Lag en standby")
                     }
                 } catch (_: Exception) { }
                 delay(CHECK_INTERVAL_MS)
@@ -106,70 +103,86 @@ class LagProtectorService : Service() {
         }
     }
 
-    /**
-     * Runs a quick 2-second UDP iperf3 test and extracts the jitter value.
-     */
     private fun measureJitter(): Double? {
-        val binPath = Shell.INTERNAL_BIN_PATH
-        if (binPath.isEmpty()) return null
-
-        val output = Shell.su(
-            "${binPath}iperf3 -c $TEST_SERVER_IP -p $TEST_SERVER_PORT -u -t 2 2>&1",
-            timeoutSec = 8,
-            silentLog = true
-        ) ?: return null
-
-        // Find jitter in the sender summary line
-        val lines = output.lines()
-        for (line in lines) {
-            if (line.contains("sender", ignoreCase = true) || line.contains("/sec", ignoreCase = true)) {
-                val match = JITTER_REGEX.find(line)
-                if (match != null) {
-                    return match.groupValues[1].toDoubleOrNull()
-                }
-            }
-        }
-        return null
+        return try {
+            val output = Shell.su("ping -c 5 -q 8.8.8.8 2>/dev/null", timeoutSec = 15, silentLog = true)
+                ?: return null
+            val statsLine = output.lines().lastOrNull { it.trimStart().startsWith("rtt") }
+                ?: return null
+            MDEV_REGEX.find(statsLine)?.groupValues?.get(1)?.toDoubleOrNull()
+        } catch (_: Exception) { null }
     }
 
-    /**
-     * Blocks network traffic from non-essential user apps using iptables.
-     * Preserves system UIDs (< 10000) and the active game.
-     */
+    private fun applyBestMtu(): Int {
+        var bestMtu = 1500
+        try {
+            for (mtu in MTU_CANDIDATES) {
+                val testSize = mtu - 28
+                val res = Shell.su(
+                    "ping -c 1 -M do -s $testSize 8.8.8.8 2>/dev/null",
+                    silentLog = true
+                )
+                if (res != null && !res.contains("Frag needed") && res.contains("bytes from")) {
+                    bestMtu = mtu
+                    break
+                }
+            }
+            Shell.su(
+                "ifconfig wlan0 mtu $bestMtu 2>/dev/null || ip link set dev wlan0 mtu $bestMtu 2>/dev/null",
+                silentLog = true
+            )
+        } catch (_: Exception) { }
+        return bestMtu
+    }
+
     private fun activateShield() {
         try {
-            // Get all user-installed package UIDs
+            val activeUid = resolveActiveGameUid()
+
             val packagesOutput = Shell.su("pm list packages -U", silentLog = true) ?: return
             val uidSet = mutableSetOf<Int>()
 
             for (line in packagesOutput.lines()) {
-                // Format: package:com.example.app uid:10123
                 val uidMatch = Regex("""uid:(\d+)""").find(line)
                 val uid = uidMatch?.groupValues?.get(1)?.toIntOrNull() ?: continue
-                // Only block user apps (UID >= 10000), skip system
-                if (uid >= 10000) {
+                if (uid >= 10000 && uid != activeUid) {
                     uidSet.add(uid)
                 }
             }
 
-            // Create a dedicated chain to avoid polluting the OUTPUT chain
             Shell.su("iptables -N YXA_LAG_SHIELD 2>/dev/null", silentLog = true)
             Shell.su("iptables -F YXA_LAG_SHIELD", silentLog = true)
             Shell.su("iptables -D OUTPUT -j YXA_LAG_SHIELD 2>/dev/null", silentLog = true)
             Shell.su("iptables -A OUTPUT -j YXA_LAG_SHIELD", silentLog = true)
 
             for (uid in uidSet) {
-                Shell.su(
-                    "iptables -A YXA_LAG_SHIELD -m owner --uid-owner $uid -j REJECT",
-                    silentLog = true
-                )
+                Shell.su("iptables -A YXA_LAG_SHIELD -m owner --uid-owner $uid -j REJECT", silentLog = true)
             }
         } catch (_: Exception) { }
     }
 
-    /**
-     * Removes all iptables rules created by the shield.
-     */
+    private fun resolveActiveGameUid(): Int? {
+        return try {
+            val focusOutput = Shell.su(
+                "dumpsys window displays 2>/dev/null | grep mCurrentFocus",
+                silentLog = true
+            ) ?: return null
+
+            val packageName = Regex("""[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+""")
+                .findAll(focusOutput)
+                .map { it.value }
+                .firstOrNull { it.contains(".") && !it.startsWith("android") }
+                ?: return null
+
+            val uidOutput = Shell.su(
+                "pm list packages -U 2>/dev/null | grep $packageName",
+                silentLog = true
+            ) ?: return null
+
+            Regex("""uid:(\d+)""").find(uidOutput)?.groupValues?.get(1)?.toIntOrNull()
+        } catch (_: Exception) { null }
+    }
+
     private fun cleanupIptables() {
         try {
             Shell.su("iptables -D OUTPUT -j YXA_LAG_SHIELD 2>/dev/null", silentLog = true)
@@ -178,17 +191,14 @@ class LagProtectorService : Service() {
         } catch (_: Exception) { }
     }
 
-    private fun buildNotification(text: String): Notification {
-        return Notification.Builder(this, "yxa_services")
+    private fun updateNotification(text: String) {
+        val notification = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Yxa Activo")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_manage)
             .setOngoing(true)
             .build()
-    }
-
-    private fun updateNotification(text: String) {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(1002, buildNotification(text))
+        nm?.notify(NOTIF_ID, notification)
     }
 }

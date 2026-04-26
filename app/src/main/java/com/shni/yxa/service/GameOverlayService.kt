@@ -500,6 +500,7 @@ class GameOverlayService : Service() {
     private fun divider() = View(this).apply { setBackgroundColor(0x22FFFFFF); layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1) }
     private fun spacer(s: Int, h: Boolean = false) = View(this).apply { layoutParams = if (h) LinearLayout.LayoutParams(s, 0) else LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, s) }
 
+    @SuppressLint("SetTextI18n")
     private fun startMonitoring() {
         monitorJob?.cancel()
         monitorJob = scope.launch {
@@ -629,17 +630,23 @@ class GameOverlayService : Service() {
         fabView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         hidePanel()
         CoroutineScope(Dispatchers.IO).launch { restoreOriginalState(originalState) }
+        getSharedPreferences("yxa_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("overlay_active", false)
+            .apply()
         scope.cancel()
         super.onDestroy()
     }
 }
 
+@SuppressLint("ViewConstructor")
 class RingGaugeView(context: Context, val colorStart: Int, val colorEnd: Int) : View(context) {
     var progress = 0
         set(value) { field = value; invalidate() }
     private val paintBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 14f; color = 0x22FFFFFF; strokeCap = Paint.Cap.ROUND }
     private val paintFg = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 14f; strokeCap = Paint.Cap.ROUND }
 
+    @SuppressLint("DrawAllocation")
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val cx = width / 2f; val cy = height / 2f; val r = Math.min(cx, cy) - 10f

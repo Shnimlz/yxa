@@ -342,10 +342,15 @@ private fun launchGame(context: Context, game: GameProfile, scope: kotlinx.corou
         }
     }
 
-    // Start overlay
-    if (Settings.canDrawOverlays(context)) GameOverlayService.start(context, game.packageName)
+    if (Settings.canDrawOverlays(context)) {
+        val prefs = context.getSharedPreferences("yxa_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean("overlay_active", true)
+            .putString("last_overlay_pkg", game.packageName)
+            .apply()
+        GameOverlayService.start(context, game.packageName)
+    }
 
-    // Launch game
     val launchIntent = context.packageManager.getLaunchIntentForPackage(game.packageName)
     launchIntent?.let { context.startActivity(it) }
 }
