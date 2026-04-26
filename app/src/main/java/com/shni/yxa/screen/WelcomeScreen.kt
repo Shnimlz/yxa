@@ -32,10 +32,6 @@ import kotlinx.coroutines.delay
 import kotlin.math.cos
 import kotlin.math.sin
 
-/**
- * Premium welcome/onboarding screen.
- * state: 0=welcome, 1=checking root, 3=root failed
- */
 @Composable
 fun WelcomeScreen(
     state: Int,
@@ -48,7 +44,6 @@ fun WelcomeScreen(
 ) {
     val primaryGreen = Color(0xFF66FF99)
 
-    // Staggered entrance animations
     var showContent by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(200)
@@ -60,7 +55,6 @@ fun WelcomeScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // ── Background ambient glows ──
         Box(
             modifier = Modifier
                 .size(400.dp)
@@ -88,7 +82,6 @@ fun WelcomeScreen(
                 )
         )
 
-        // ── Geometric spirograph art ──
         val infiniteTransition = rememberInfiniteTransition(label = "geo")
         val rotation by infiniteTransition.animateFloat(
             initialValue = 0f,
@@ -121,7 +114,6 @@ fun WelcomeScreen(
             val cy = size.height / 2
             val r = size.minDimension / 2.6f * pulse
 
-            // Outer rotating ellipses
             for (i in 0 until 14) {
                 val angle = (i * (360f / 14f)) + rotation
                 val alphaVal = (0.08f + i * 0.018f).coerceAtMost(0.3f)
@@ -135,7 +127,6 @@ fun WelcomeScreen(
                 }
             }
 
-            // Inner ring
             drawCircle(
                 color = primaryGreen.copy(alpha = 0.1f * pulse),
                 radius = r * 0.45f,
@@ -143,7 +134,6 @@ fun WelcomeScreen(
                 style = Stroke(width = 1f)
             )
 
-            // Center hexagon — counter-rotating
             val hexR = r * 0.2f
             val hexPath = Path()
             for (i in 0..5) {
@@ -154,12 +144,9 @@ fun WelcomeScreen(
             }
             hexPath.close()
 
-            // Hex fill glow
             drawPath(hexPath, color = primaryGreen.copy(alpha = 0.06f * pulse))
-            // Hex stroke
             drawPath(hexPath, color = primaryGreen.copy(alpha = 0.45f * pulse), style = Stroke(1.5f))
 
-            // Center dot
             drawCircle(
                 color = primaryGreen.copy(alpha = 0.6f * pulse),
                 radius = 3f,
@@ -167,7 +154,6 @@ fun WelcomeScreen(
             )
         }
 
-        // ── Gradient overlay from bottom for text readability ──
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -180,7 +166,6 @@ fun WelcomeScreen(
                 )
         )
 
-        // ── Content ──
         AnimatedVisibility(
             visible = showContent,
             enter = fadeIn(tween(600)) + slideInVertically(
@@ -196,7 +181,6 @@ fun WelcomeScreen(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.Bottom
             ) {
-                // App branding
                 Text(
                     "Yxa",
                     style = MaterialTheme.typography.displaySmall.copy(
@@ -394,20 +378,20 @@ fun WelcomeScreen(
                     2 -> {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Permisos requeridos", style = MaterialTheme.typography.titleSmall, color = primaryGreen, fontWeight = FontWeight.Bold)
-                            
+
                             Button(onClick = onRequestNotifications, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f), contentColor = Color.White)) {
                                 Text("1. Permitir Notificaciones")
                             }
-                            
+
                             Button(onClick = onRequestOverlay, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f), contentColor = Color.White)) {
                                 Text("2. Permiso de Superposición")
                             }
-                            
+
                             Button(onClick = onRequestHibernation, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f), contentColor = Color.White)) {
-                                Text("3. Desactivar Hibernación")
+                                Text("3. Excluir de Optimización de Batería")
                             }
 
                             Spacer(Modifier.height(8.dp))

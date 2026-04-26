@@ -5,8 +5,12 @@ import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -26,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Settings
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -97,18 +101,18 @@ fun AppRoot(onCloseApp: () -> Unit, themeMode: YxaThemeMode, onThemeChange: (Yxa
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("yxa_prefs", Context.MODE_PRIVATE) }
     val isFirstLaunch = remember { !prefs.getBoolean("welcome_seen", false) }
-    
-    var appState by remember { 
+
+    var appState by remember {
         mutableStateOf(
-            if (android.os.Build.VERSION.SDK_INT <= 29) AppState.UNSUPPORTED_OS 
-            else if (isFirstLaunch) AppState.WELCOME 
+            if (android.os.Build.VERSION.SDK_INT <= 29) AppState.UNSUPPORTED_OS
+            else if (isFirstLaunch) AppState.WELCOME
             else AppState.CHECKING_PERMISSIONS
         )
     }
 
     val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-    ) { _ -> }
+    ) { }
 
     val onRequestNotifications = {
         if (android.os.Build.VERSION.SDK_INT >= 33) {
@@ -117,19 +121,30 @@ fun AppRoot(onCloseApp: () -> Unit, themeMode: YxaThemeMode, onThemeChange: (Yxa
     }
 
     val onRequestOverlay = {
-        val intent = android.content.Intent(
-            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            android.net.Uri.parse("package:${context.packageName}")
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:${context.packageName}")
         )
         context.startActivity(intent)
     }
 
     val onRequestHibernation = {
-        val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = android.net.Uri.parse("package:${context.packageName}")
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:${context.packageName}")
+            }
+            try {
+                context.startActivity(intent)
+            } catch (_: Exception) {
+                val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(fallback)
+            }
+        } else {
+            android.widget.Toast.makeText(context, "La app ya está exenta de optimización de batería", android.widget.Toast.LENGTH_SHORT).show()
         }
-        context.startActivity(intent)
-        android.widget.Toast.makeText(context, "Desactiva 'Pausar actividad de la app si no se usa'", android.widget.Toast.LENGTH_LONG).show()
     }
 
     val onVerifyPermissions = {
@@ -152,6 +167,13 @@ fun AppRoot(onCloseApp: () -> Unit, themeMode: YxaThemeMode, onThemeChange: (Yxa
             if (ok) {
                 com.shni.yxa.util.DependencyManager.setupDependencies(context)
                 prefs.edit().putBoolean("welcome_seen", true).apply()
+                val servicePrefs = context.getSharedPreferences("yxa_prefs", Context.MODE_PRIVATE)
+                if (servicePrefs.getBoolean("lag_protector", false)) {
+                    com.shni.yxa.service.LagProtectorService.start(context)
+                }
+                if (servicePrefs.getBoolean("auto_ram_clean", false)) {
+                    com.shni.yxa.service.AutoRamCleanerService.start(context)
+                }
                 appState = AppState.CREATING_BACKUP
             } else {
                 appState = AppState.ROOT_FAILED
@@ -159,7 +181,7 @@ fun AppRoot(onCloseApp: () -> Unit, themeMode: YxaThemeMode, onThemeChange: (Yxa
         }
         if (appState == AppState.CREATING_BACKUP) {
             com.shni.yxa.util.BackupManager.createBackup(context)
-            delay(500) // Small delay for visual feedback
+            delay(500)
             appState = AppState.ROOT_OK
         }
     }
@@ -194,9 +216,9 @@ fun AppNavigation(themeMode: YxaThemeMode, onThemeChange: (YxaThemeMode) -> Unit
     var homeScreen by remember { mutableStateOf<Screen>(Screen.Dashboard) }
     var gameScreen by remember { mutableStateOf<Screen?>(null) }
     var isForward by remember { mutableStateOf(true) }
-    var isCleaning by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var settingsScreen by remember { mutableStateOf<Screen?>(null) }
+    var showProcessMonitor by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     var updateInfo by remember { mutableStateOf<com.shni.yxa.util.UpdateInfo?>(null) }
@@ -217,28 +239,19 @@ fun AppNavigation(themeMode: YxaThemeMode, onThemeChange: (YxaThemeMode) -> Unit
 
     BackHandler(enabled = true) {
         when {
-            showSettings && settingsScreen != null -> {
-                settingsScreen = null
-            }
-            showSettings -> {
-                showSettings = false
-            }
-            selectedTab == BottomTab.GAME && gameScreen != null -> {
-                gameScreen = null
-            }
+            showProcessMonitor -> { showProcessMonitor = false }
+            showSettings && settingsScreen != null -> { settingsScreen = null }
+            showSettings -> { showSettings = false }
+            selectedTab == BottomTab.GAME && gameScreen != null -> { gameScreen = null }
             selectedTab == BottomTab.HOME && homeScreen != Screen.Dashboard -> {
                 isForward = false
                 homeScreen = Screen.Dashboard
             }
-            selectedTab != BottomTab.HOME -> {
-                selectedTab = BottomTab.HOME
-            }
-            else -> {
-                (context as? Activity)?.finish()
-            }
+            selectedTab != BottomTab.HOME -> { selectedTab = BottomTab.HOME }
+            else -> { (context as? Activity)?.finish() }
         }
     }
-    val showBottomBar = !showSettings && (
+    val showBottomBar = !showSettings && !showProcessMonitor && (
         (selectedTab == BottomTab.HOME && homeScreen == Screen.Dashboard)
         || (selectedTab == BottomTab.GAME && gameScreen == null)
         || (selectedTab == BottomTab.RED)
@@ -250,26 +263,13 @@ fun AppNavigation(themeMode: YxaThemeMode, onThemeChange: (YxaThemeMode) -> Unit
         floatingActionButton = {
             if (showBottomBar) {
                 FloatingActionButton(
-                    onClick = {
-                        if (!isCleaning) {
-                            isCleaning = true
-                            scope.launch(Dispatchers.IO) {
-                                com.shni.yxa.util.Shell.su("sync; echo 3 > /proc/sys/vm/drop_caches")
-                                kotlinx.coroutines.delay(1000)
-                                isCleaning = false
-                            }
-                        }
-                    },
+                    onClick = { showProcessMonitor = true },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     shape = CircleShape,
                     modifier = Modifier.offset(y = 36.dp)
                 ) {
-                    if (isCleaning) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.FlashOn, contentDescription = "Limpieza Rápida")
-                    }
+                    Icon(Icons.Default.Memory, contentDescription = "Monitor de Procesos")
                 }
             }
         },
@@ -288,7 +288,6 @@ fun AppNavigation(themeMode: YxaThemeMode, onThemeChange: (YxaThemeMode) -> Unit
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         val tabs = BottomTab.entries
-                        // Lado Izquierdo
                         Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly) {
                             tabs.take(2).forEach { tab ->
                                 NavBarItem(
@@ -298,9 +297,7 @@ fun AppNavigation(themeMode: YxaThemeMode, onThemeChange: (YxaThemeMode) -> Unit
                                 )
                             }
                         }
-                        // Espacio Central para el Cutout
                         Spacer(Modifier.width(80.dp))
-                        // Lado Derecho (2 pestañas)
                         Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly) {
                             tabs.takeLast(2).forEach { tab ->
                                 NavBarItem(
@@ -370,14 +367,14 @@ fun AppNavigation(themeMode: YxaThemeMode, onThemeChange: (YxaThemeMode) -> Unit
                     BottomTab.RED -> {
                         NetworkSettingsScreen()
                     }
-                    BottomTab.PROC -> {
-                        ProcessScreen(onBack = { selectedTab = BottomTab.HOME })
-                    }
                     BottomTab.LOGS -> {
                         LogsScreen()
                     }
                 }
             }
+        }
+        if (showProcessMonitor) {
+            ProcessScreen(onBack = { showProcessMonitor = false })
         }
         // Overlay de Ajustes
         if (showSettings) {

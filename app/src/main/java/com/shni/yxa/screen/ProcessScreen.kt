@@ -108,30 +108,33 @@ fun ProcessTab() {
     var isLoading by remember { mutableStateOf(true) }
     var killTarget by remember { mutableStateOf<ProcessEntry?>(null) }
 
-    // Live refresh every 3 seconds
     LaunchedEffect(Unit) {
         while (true) {
             val raw = withContext(Dispatchers.IO) {
-                Shell.su("ps -A -o PID,USER,NAME,PCPU,RSS --no-headers 2>/dev/null || ps -A 2>/dev/null")
+                Shell.su("ps -A -o pid,user,%cpu,rss,name 2>/dev/null")
             } ?: ""
-            processes = parsePsOutput(raw)
+            val parsed = withContext(Dispatchers.Default) { parsePsOutput(raw) }
+            processes = parsed
             isLoading = false
             delay(3000)
         }
     }
 
-    val sorted = remember(processes, sortBy, query) {
-        var list = if (query.isBlank()) processes else processes.filter { it.name.contains(query, ignoreCase = true) || it.pid.contains(query) }
-        list = when (sortBy) {
-            "ram" -> list.sortedByDescending { it.ramKb }
-            "pid" -> list.sortedBy { it.pid.toIntOrNull() ?: 0 }
-            else -> list.sortedByDescending { it.cpuPct }
+    val sorted by remember(processes, sortBy, query) {
+        derivedStateOf {
+            var list = if (query.isBlank()) processes else processes.filter {
+                it.name.contains(query, ignoreCase = true) || it.pid.contains(query)
+            }
+            list = when (sortBy) {
+                "ram" -> list.sortedByDescending { it.ramKb }
+                "pid" -> list.sortedBy { it.pid.toIntOrNull() ?: 0 }
+                else -> list.sortedByDescending { it.cpuPct }
+            }
+            list
         }
-        list
     }
 
     Column(Modifier.fillMaxSize()) {
-        // Search + sort bar
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = query,
@@ -146,7 +149,6 @@ fun ProcessTab() {
             FilterChip(selected = sortBy == "ram", onClick = { sortBy = "ram" }, label = { Text("RAM", fontSize = 11.sp) })
         }
 
-        // Header row
         Row(
             Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -224,16 +226,17 @@ private fun ProcessRow(proc: ProcessEntry, onKill: () -> Unit) {
 
 private fun parsePsOutput(raw: String): List<ProcessEntry> {
     val result = mutableListOf<ProcessEntry>()
-    for (line in raw.lines()) {
+    val lines = raw.lines().drop(1)
+    for (line in lines) {
         val parts = line.trim().split(Regex("\\s+"))
-        if (parts.size < 4) continue
+        if (parts.size < 5) continue
         val pid = parts[0]
-        if (pid == "PID" || pid.toIntOrNull() == null) continue
-        val user = parts.getOrElse(1) { "" }
-        val name = parts.last()
-        val cpuRaw = parts.getOrElse(parts.size - 3) { "0" }.replace(",", ".").toFloatOrNull() ?: 0f
-        val rssRaw = parts.getOrElse(parts.size - 2) { "0" }.toLongOrNull() ?: 0L
-        result.add(ProcessEntry(pid = pid, user = user, name = name, cpuPct = cpuRaw, ramKb = rssRaw))
+        if (pid.toIntOrNull() == null) continue
+        val user = parts[1]
+        val cpuPct = parts[2].replace(",", ".").toFloatOrNull() ?: 0f
+        val ramKb = parts[3].toLongOrNull() ?: 0L
+        val name = parts.drop(4).joinToString(" ")
+        result.add(ProcessEntry(pid, user, name, cpuPct, ramKb))
     }
     return result
 }
@@ -244,7 +247,7 @@ private fun parsePsOutput(raw: String): List<ProcessEntry> {
 fun AppsTab() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var filter by remember { mutableStateOf(0) } // 0=All,1=User,2=System
+    var filter by remember { mutableStateOf(0) }
     var apps by remember { mutableStateOf<List<ProcAppEntry>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var query by remember { mutableStateOf("") }
@@ -254,15 +257,17 @@ fun AppsTab() {
         isLoading = false
     }
 
-    val visible = remember(apps, filter, query) {
-        apps.filter { app ->
-            val matchFilter = when (filter) {
-                1 -> !app.isSystem
-                2 -> app.isSystem
-                else -> true
+    val visible by remember(apps, filter, query) {
+        derivedStateOf {
+            apps.filter { app ->
+                val matchFilter = when (filter) {
+                    1 -> !app.isSystem
+                    2 -> app.isSystem
+                    else -> true
+                }
+                val matchQuery = query.isBlank() || app.label.contains(query, ignoreCase = true) || app.packageName.contains(query, ignoreCase = true)
+                matchFilter && matchQuery
             }
-            val matchQuery = query.isBlank() || app.label.contains(query, ignoreCase = true) || app.packageName.contains(query, ignoreCase = true)
-            matchFilter && matchQuery
         }
     }
 
@@ -380,7 +385,7 @@ fun HiddenTab() {
         withContext(Dispatchers.IO) {
             disabledPkgs = Shell.su("pm list packages -d 2>/dev/null") ?: "Sin datos"
             rootPkgs = Shell.su("pm list packages --uid 1000 2>/dev/null") ?: "Sin datos"
-            dangerousPerms = Shell.su("pm list packages -g 2>/dev/null | head -40") ?: "Sin datos"
+            dangerousPerms = Shell.su("dumpsys package permissions 2>/dev/null | grep -E 'permission|protection' | head -50") ?: "Sin datos"
             activeServices = Shell.su("dumpsys activity services 2>/dev/null | grep 'ServiceRecord' | head -30") ?: "Sin datos"
         }
         isLoading = false

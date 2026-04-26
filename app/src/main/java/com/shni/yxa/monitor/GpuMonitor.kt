@@ -4,9 +4,6 @@ import com.shni.yxa.util.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * GPU load monitor with multi-vendor auto-detection.
- */
 class GpuMonitor {
     private var detectedPath: String? = null
     private var detectionAttempted = false
@@ -45,17 +42,16 @@ class GpuMonitor {
         } catch (_: Exception) { null }
     }
 
-    private fun detectGpuPath() {
+    private suspend fun detectGpuPath() = withContext(Dispatchers.IO) {
         for (c in candidatePaths) {
             val out = Shell.su("cat ${c.path}", timeoutSec = 2, silentLog = true)
-            if (out != null) { detectedPath = c.path; readMode = c.mode; return }
+            if (out != null) { detectedPath = c.path; readMode = c.mode; return@withContext }
         }
-        // devfreq fallback
         try {
-            val nodes = Shell.su("ls /sys/class/devfreq/", timeoutSec = 2, silentLog = true) ?: return
+            val nodes = Shell.su("ls /sys/class/devfreq/", timeoutSec = 2, silentLog = true) ?: return@withContext
             val gpuNode = nodes.lines().firstOrNull {
                 it.contains("gpu", true) || it.contains("kgsl", true) || it.contains("mali", true)
-            } ?: return
+            } ?: return@withContext
             val loadPath = "/sys/class/devfreq/$gpuNode/load"
             if (Shell.su("cat $loadPath", timeoutSec = 2, silentLog = true) != null) {
                 detectedPath = loadPath; readMode = ReadMode.DIRECT_PERCENTAGE

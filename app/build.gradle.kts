@@ -15,15 +15,16 @@ android {
         applicationId = "com.shni.yxa"
         minSdk = 28
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.3-0"
+        versionCode = 15
+        versionName = "1.4-0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
