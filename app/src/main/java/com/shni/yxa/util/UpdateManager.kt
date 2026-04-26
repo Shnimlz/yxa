@@ -21,7 +21,7 @@ data class UpdateInfo(
 object UpdateManager {
     private const val GITHUB_API_URL = "https://api.github.com/repos/Shnimlz/yxa/releases/latest"
 
-    suspend fun checkForUpdates(): UpdateInfo? = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdates(currentVersion: String): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
             val url = URL(GITHUB_API_URL)
             val connection = url.openConnection() as HttpURLConnection
@@ -33,6 +33,14 @@ object UpdateManager {
                 val json = JSONObject(response)
                 
                 val tagName = json.getString("tag_name")
+                
+                val cleanRemote = tagName.removePrefix("v").trim()
+                val cleanLocal = currentVersion.removePrefix("v").trim()
+                
+                if (cleanRemote == cleanLocal) {
+                    return@withContext null
+                }
+                
                 val htmlUrl = json.getString("html_url")
                 val body = json.getString("body")
                 

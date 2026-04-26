@@ -106,7 +106,8 @@ fun SettingsScreen(currentTheme: YxaThemeMode, onThemeChange: (YxaThemeMode) -> 
                 if (!isCheckingUpdate) {
                     isCheckingUpdate = true
                     scope.launch {
-                        val update = com.shni.yxa.util.UpdateManager.checkForUpdates()
+                        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+                        val update = com.shni.yxa.util.UpdateManager.checkForUpdates(packageInfo.versionName ?: "")
                         if (update != null) {
                             manualUpdateInfo = update
                         } else {

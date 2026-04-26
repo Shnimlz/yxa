@@ -201,18 +201,19 @@ fun AppNavigation(themeMode: YxaThemeMode, onThemeChange: (YxaThemeMode) -> Unit
 
     var updateInfo by remember { mutableStateOf<com.shni.yxa.util.UpdateInfo?>(null) }
     var hasCheckedUpdate by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
 
     LaunchedEffect(hasCheckedUpdate) {
         if (!hasCheckedUpdate) {
-            val update = com.shni.yxa.util.UpdateManager.checkForUpdates()
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            val currentVersion = packageInfo.versionName ?: ""
+            val update = com.shni.yxa.util.UpdateManager.checkForUpdates(currentVersion)
             if (update != null) {
                 updateInfo = update
             }
             hasCheckedUpdate = true
         }
     }
-
-    val context = LocalContext.current
 
     BackHandler(enabled = true) {
         when {
