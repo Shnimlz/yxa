@@ -47,11 +47,31 @@ class LagProtectorService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel("yxa_services", "Servicios de Optimización Yxa", NotificationManager.IMPORTANCE_LOW)
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.createNotificationChannel(channel)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIF_ID, buildNotification("Monitoreando estabilidad de red..."))
+        val notification = Notification.Builder(this, "yxa_services")
+            .setContentTitle("Yxa Activo")
+            .setContentText("Optimizando el sistema en segundo plano")
+            .setSmallIcon(android.R.drawable.ic_menu_manage)
+            .setOngoing(true)
+            .build()
+            
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                startForeground(1002, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } catch (e: Exception) {
+                startForeground(1002, notification)
+            }
+        } else {
+            startForeground(1002, notification)
+        }
+
         startMonitoring()
         return START_STICKY
     }
@@ -78,7 +98,7 @@ class LagProtectorService : Service() {
                     } else if (isShielded) {
                         cleanupIptables()
                         isShielded = false
-                        updateNotification("Red estable. Monitoreando...")
+                        updateNotification("Optimizando el sistema en segundo plano")
                     }
                 } catch (_: Exception) { }
                 delay(CHECK_INTERVAL_MS)
@@ -158,31 +178,17 @@ class LagProtectorService : Service() {
         } catch (_: Exception) { }
     }
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Escudo Anti-Lag",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Monitoreo de estabilidad de red en segundo plano"
-            }
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(channel)
-        }
-    }
-
     private fun buildNotification(text: String): Notification {
-        return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Yxa - Escudo Anti-Lag")
+        return Notification.Builder(this, "yxa_services")
+            .setContentTitle("Yxa Activo")
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(android.R.drawable.ic_menu_manage)
             .setOngoing(true)
             .build()
     }
 
     private fun updateNotification(text: String) {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIF_ID, buildNotification(text))
+        nm.notify(1002, buildNotification(text))
     }
 }

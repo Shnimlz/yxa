@@ -133,4 +133,36 @@ object BootScriptManager {
         tmpFile.delete()
         }
     }
+
+    fun applyBootOptimizations(context: Context) {
+        scope.launch {
+            val prefs = getPrefs(context)
+            val cpuEnabled = prefs.getBoolean(PREF_CPU_ENABLED, false)
+            val ramEnabled = prefs.getBoolean(PREF_RAM_ENABLED, false)
+            val netEnabled = prefs.getBoolean(PREF_NET_ENABLED, false)
+            val gpuEnabled = prefs.getBoolean(PREF_GPU_ENABLED, false)
+
+            val dangerousKeys = setOf("online")
+            
+            val commands = mutableListOf<String>()
+            
+            if (cpuEnabled) {
+                commands.addAll(prefs.all.filterKeys { it.startsWith("cpu_") && dangerousKeys.none { d -> it.contains(d) } }.values.map { it.toString() })
+            }
+            if (ramEnabled) {
+                commands.addAll(prefs.all.filterKeys { it.startsWith("ram_") }.values.map { it.toString() })
+            }
+            if (netEnabled) {
+                commands.addAll(prefs.all.filterKeys { it.startsWith("net_") }.values.map { it.toString() })
+            }
+            if (gpuEnabled) {
+                commands.addAll(prefs.all.filterKeys { it.startsWith("gpu_") }.values.map { it.toString() })
+            }
+
+            if (commands.isNotEmpty()) {
+                val fullCommand = commands.joinToString(";")
+                Shell.su(fullCommand)
+            }
+        }
+    }
 }

@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +38,7 @@ private val ramProfiles = listOf(
     RamProfile("Rendimiento", Icons.Default.RocketLaunch, "Apps en RAM, cache agresivo", 10, 200, 10, 3, 16384),
 )
 
+private data class AppInfo(val packageName: String, val name: String, val icon: androidx.compose.ui.graphics.ImageBitmap?)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -225,11 +227,77 @@ private fun AdvancedRamTab(zramAvail: Boolean, zramMb: Int, ksmAvail: Boolean, k
     var showDrop by remember { mutableStateOf(false) }
     var dropDone by remember { mutableStateOf(false) }
     
+    var showWhitelistPicker by remember { mutableStateOf(false) }
+    var isLoadingApps by remember { mutableStateOf(false) }
+    var installedApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
+    var currentWhitelistApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
+    
     val prefs = context.getSharedPreferences("yxa_prefs", Context.MODE_PRIVATE)
     var autoCleanEnabled by remember { mutableStateOf(prefs.getBoolean("auto_ram_clean", false)) }
     var autoCleanThreshold by remember { mutableIntStateOf(prefs.getInt("auto_ram_clean_threshold", 75)) }
     var whitelist by remember { mutableStateOf(prefs.getStringSet("ram_whitelist", emptySet()) ?: emptySet()) }
-    var newPackageName by remember { mutableStateOf("") }
+    
+    LaunchedEffect(whitelist) {
+        withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            val list = mutableListOf<AppInfo>()
+            whitelist.forEach { pkg ->
+                try {
+                    val info = pm.getApplicationInfo(pkg, 0)
+                    val label = pm.getApplicationLabel(info).toString()
+                    val drawable = pm.getApplicationIcon(info)
+                    val bitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: run {
+                        val bmp = android.graphics.Bitmap.createBitmap(
+                            drawable.intrinsicWidth.takeIf { it > 0 } ?: 1,
+                            drawable.intrinsicHeight.takeIf { it > 0 } ?: 1,
+                            android.graphics.Bitmap.Config.ARGB_8888
+                        )
+                        val canvas = android.graphics.Canvas(bmp)
+                        drawable.setBounds(0, 0, canvas.width, canvas.height)
+                        drawable.draw(canvas)
+                        bmp
+                    }
+                    list.add(AppInfo(pkg, label, bitmap.asImageBitmap()))
+                } catch (e: Exception) {
+                    list.add(AppInfo(pkg, pkg, null))
+                }
+            }
+            currentWhitelistApps = list.sortedBy { it.name.lowercase() }
+        }
+    }
+    
+    val loadAvailableApps: () -> Unit = {
+        isLoadingApps = true
+        showWhitelistPicker = true
+        scope.launch(Dispatchers.IO) {
+            val pm = context.packageManager
+            val packages = try { pm.getInstalledApplications(0) } catch (e: Exception) { emptyList() }
+            val list = mutableListOf<AppInfo>()
+            packages.forEach { info ->
+                try {
+                    val isSystem = (info.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+                    if (!isSystem && !whitelist.contains(info.packageName) && info.packageName != context.packageName) {
+                        val label = pm.getApplicationLabel(info).toString()
+                        val drawable = pm.getApplicationIcon(info)
+                        val bitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: run {
+                            val bmp = android.graphics.Bitmap.createBitmap(
+                                drawable.intrinsicWidth.takeIf { it > 0 } ?: 1,
+                                drawable.intrinsicHeight.takeIf { it > 0 } ?: 1,
+                                android.graphics.Bitmap.Config.ARGB_8888
+                            )
+                            val canvas = android.graphics.Canvas(bmp)
+                            drawable.setBounds(0, 0, canvas.width, canvas.height)
+                            drawable.draw(canvas)
+                            bmp
+                        }
+                        list.add(AppInfo(info.packageName, label, bitmap.asImageBitmap()))
+                    }
+                } catch (e: Exception) {}
+            }
+            installedApps = list.sortedBy { it.name.lowercase() }
+            isLoadingApps = false
+        }
+    }
     
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer), shape = RoundedCornerShape(16.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -268,44 +336,37 @@ private fun AdvancedRamTab(zramAvail: Boolean, zramMb: Int, ksmAvail: Boolean, k
                 Text("Lista de Excepciones", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
                 Text("Aplicaciones que nunca serán cerradas.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = newPackageName,
-                        onValueChange = { newPackageName = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("ej. com.spotify.music") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    Button(
-                        onClick = {
-                            if (newPackageName.isNotBlank()) {
-                                val updatedSet = whitelist + newPackageName.trim()
-                                whitelist = updatedSet
-                                prefs.edit().putStringSet("ram_whitelist", updatedSet).apply()
-                                newPackageName = ""
-                            }
-                        },
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Añadir")
-                    }
+                Button(
+                    onClick = { loadAvailableApps() },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Añadir Aplicación")
                 }
                 
-                if (whitelist.isNotEmpty()) {
+                if (currentWhitelistApps.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        whitelist.forEach { pkg ->
+                        currentWhitelistApps.forEach { app ->
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                    Text(pkg, style = MaterialTheme.typography.bodySmall)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (app.icon != null) {
+                                            androidx.compose.foundation.Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(24.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Column {
+                                            Text(app.name, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                            Text(app.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
                                     IconButton(
                                         onClick = {
-                                            val updatedSet = whitelist - pkg
+                                            val updatedSet = whitelist - app.packageName
                                             whitelist = updatedSet
                                             prefs.edit().putStringSet("ram_whitelist", updatedSet).apply()
                                         },
@@ -357,6 +418,59 @@ private fun AdvancedRamTab(zramAvail: Boolean, zramMb: Int, ksmAvail: Boolean, k
                 }
             }
         }
+    }
+    
+
+    if (showWhitelistPicker) {
+        AlertDialog(
+            onDismissRequest = { showWhitelistPicker = false },
+            title = { Text("Seleccionar Aplicación") },
+            text = {
+                if (isLoadingApps) {
+                    Box(Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(installedApps.size) { index ->
+                            val app = installedApps[index]
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shape = RoundedCornerShape(8.dp),
+                                onClick = {
+                                    val updatedSet = whitelist + app.packageName
+                                    whitelist = updatedSet
+                                    prefs.edit().putStringSet("ram_whitelist", updatedSet).apply()
+                                    showWhitelistPicker = false
+                                }
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (app.icon != null) {
+                                        androidx.compose.foundation.Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(32.dp))
+                                        Spacer(Modifier.width(12.dp))
+                                    }
+                                    Column {
+                                        Text(app.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                        Text(app.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showWhitelistPicker = false }) {
+                    Text("Cerrar")
+                }
+            }
+        )
     }
 }
 

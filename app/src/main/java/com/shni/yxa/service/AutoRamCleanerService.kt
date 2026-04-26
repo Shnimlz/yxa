@@ -19,32 +19,31 @@ class AutoRamCleanerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val channelId = "yxa_ram_cleaner_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "Yxa Auto RAM Cleaner", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel("yxa_services", "Servicios de Optimización Yxa", NotificationManager.IMPORTANCE_LOW)
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Yxa Auto-Drop")
-            .setContentText("Monitor de memoria RAM activo")
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val notification = NotificationCompat.Builder(this, "yxa_services")
+            .setContentTitle("Yxa Activo")
+            .setContentText("Optimizando el sistema en segundo plano")
             .setSmallIcon(android.R.drawable.ic_menu_manage)
             .setOngoing(true)
             .build()
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Needed to avoid ForegroundServiceTypeNotDeclaredException if targetSDK >= 34
             try {
-                startForeground(3001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                startForeground(1001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
             } catch (e: Exception) {
-                startForeground(3001, notification)
+                startForeground(1001, notification)
             }
         } else {
-            startForeground(3001, notification)
+            startForeground(1001, notification)
         }
-    }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         serviceScope.launch {
             while (isActive) {
                 try {
